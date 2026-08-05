@@ -38,6 +38,8 @@ type siteModelHourlyKey struct {
 var siteModelHourlyCache = make(map[siteModelHourlyKey]*model.StatsSiteModelHourly)
 var siteModelHourlyCacheLock sync.Mutex
 
+const statsSiteModelHourlyTable = "stats_site_model_hourlies"
+
 // StatsSiteModelHourlyUpdate 记录一次站点渠道请求到对应小时桶。
 // 非站点渠道（无绑定）会被静默忽略。
 func StatsSiteModelHourlyUpdate(channelID int, actualModel string, metrics model.StatsMetrics) {
@@ -126,22 +128,98 @@ func StatsSiteModelHourlySaveDB(ctx context.Context) error {
 	siteModelHourlyCacheLock.Unlock()
 
 	dbConn := db.GetDB().WithContext(ctx)
-	return dbConn.Clauses(clause.OnConflict{
+	if err := saveStatsSiteModelHourlyRows(dbConn, rows); err != nil {
+		restoreStatsSiteModelHourlyRows(rows)
+		return err
+	}
+	return nil
+}
+
+func saveStatsSiteModelHourlyRows(dbConn *gorm.DB, rows []model.StatsSiteModelHourly) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	return dbConn.Clauses(statsSiteModelHourlyOnConflict(dbConn.Dialector.Name())).Create(&rows).Error
+}
+
+func statsSiteModelHourlyOnConflict(dialect string) clause.OnConflict {
+	currentColumn := func(name string) clause.Column {
+		return clause.Column{Table: statsSiteModelHourlyTable, Name: name}
+	}
+	excludedColumn := func(name string) clause.Column {
+		return clause.Column{Table: "excluded", Name: name}
+	}
+	add := func(name string) clause.Expr {
+		if dialect == "mysql" {
+			return gorm.Expr("? + VALUES(?)", currentColumn(name), clause.Column{Name: name})
+		}
+		return gorm.Expr("? + ?", currentColumn(name), excludedColumn(name))
+	}
+
+	var latestRequestAt clause.Expr
+	switch dialect {
+	case "mysql":
+		latestRequestAt = gorm.Expr(
+			"GREATEST(?, VALUES(?))",
+			currentColumn("last_request_at"),
+			clause.Column{Name: "last_request_at"},
+		)
+	case "sqlite":
+		latestRequestAt = gorm.Expr(
+			"MAX(?, ?)",
+			currentColumn("last_request_at"),
+			excludedColumn("last_request_at"),
+		)
+	default:
+		latestRequestAt = gorm.Expr(
+			"GREATEST(?, ?)",
+			currentColumn("last_request_at"),
+			excludedColumn("last_request_at"),
+		)
+	}
+
+	return clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "hour"}, {Name: "site_account_id"}, {Name: "group_key"}, {Name: "model_name"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"date":            clause.Column{Name: "date"},
-			"input_token":     gorm.Expr("stats_site_model_hourlies.input_token + EXCLUDED.input_token"),
-			"output_token":    gorm.Expr("stats_site_model_hourlies.output_token + EXCLUDED.output_token"),
-			"input_cost":      gorm.Expr("stats_site_model_hourlies.input_cost + EXCLUDED.input_cost"),
-			"output_cost":     gorm.Expr("stats_site_model_hourlies.output_cost + EXCLUDED.output_cost"),
-			"wait_time":       gorm.Expr("stats_site_model_hourlies.wait_time + EXCLUDED.wait_time"),
-			"request_success": gorm.Expr("stats_site_model_hourlies.request_success + EXCLUDED.request_success"),
-			"request_failed":  gorm.Expr("stats_site_model_hourlies.request_failed + EXCLUDED.request_failed"),
-			"last_request_at": gorm.Expr("MAX(stats_site_model_hourlies.last_request_at, EXCLUDED.last_request_at)"),
+			"date":            excludedColumn("date"),
+			"input_token":     add("input_token"),
+			"output_token":    add("output_token"),
+			"input_cost":      add("input_cost"),
+			"output_cost":     add("output_cost"),
+			"wait_time":       add("wait_time"),
+			"request_success": add("request_success"),
+			"request_failed":  add("request_failed"),
+			"last_request_at": latestRequestAt,
 		}),
-	}).Create(&rows).Error
+	}
+}
+
+func restoreStatsSiteModelHourlyRows(rows []model.StatsSiteModelHourly) {
+	siteModelHourlyCacheLock.Lock()
+	defer siteModelHourlyCacheLock.Unlock()
+
+	for i := range rows {
+		row := rows[i]
+		key := siteModelHourlyKey{
+			Hour:          row.Hour,
+			SiteAccountID: row.SiteAccountID,
+			GroupKey:      row.GroupKey,
+			ModelName:     row.ModelName,
+		}
+		if current, ok := siteModelHourlyCache[key]; ok {
+			current.StatsMetrics.Add(row.StatsMetrics)
+			if row.LastRequestAt > current.LastRequestAt {
+				current.LastRequestAt = row.LastRequestAt
+			}
+			if current.Date == "" {
+				current.Date = row.Date
+			}
+			continue
+		}
+		siteModelHourlyCache[key] = &row
+	}
 }
 
 const siteChannelModelHistoryWindow = 90 * 24 * time.Hour
