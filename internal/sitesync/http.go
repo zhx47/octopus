@@ -519,7 +519,10 @@ func shouldTryAlternativeManagedAuth(err error) bool {
 }
 
 func siteRequiresManagedUserIDHeader(siteRecord *model.Site) bool {
-	return siteRecord != nil && siteRecord.Platform == model.SitePlatformNewAPI
+	if siteRecord == nil {
+		return false
+	}
+	return siteRecord.Platform == model.SitePlatformNewAPI || siteRecord.Platform == model.SitePlatformRunAnyTime
 }
 
 func shouldRetryManagedRequestWithUserID(err error) bool {

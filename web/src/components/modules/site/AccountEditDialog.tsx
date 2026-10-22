@@ -287,7 +287,8 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
             }
 
             const shouldIncludePlatformUserID =
-                currentPlatform === SitePlatform.NewAPI &&
+                (currentPlatform === SitePlatform.NewAPI ||
+                    currentPlatform === SitePlatform.RunAnyTime) &&
                 accountForm.credential_type === SiteCredentialType.AccessToken;
             const platformUserIDInput = shouldIncludePlatformUserID
                 ? accountForm.platform_user_id.trim()
@@ -464,7 +465,8 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                         : '',
                                                 platform_user_id:
                                                     nextType === SiteCredentialType.AccessToken &&
-                                                    currentPlatform === SitePlatform.NewAPI
+                                                    (currentPlatform === SitePlatform.NewAPI ||
+                                                        currentPlatform === SitePlatform.RunAnyTime)
                                                         ? current.platform_user_id
                                                         : '',
                                             };
@@ -604,7 +606,8 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                 </div>
                                             ) : null}
 
-                                            {currentPlatform === SitePlatform.NewAPI ? (
+                                            {currentPlatform === SitePlatform.NewAPI ||
+                                            currentPlatform === SitePlatform.RunAnyTime ? (
                                                 <label className="grid gap-2 text-sm">
                                                     <span className="font-medium">Platform User ID</span>
                                                     <Input

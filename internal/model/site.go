@@ -14,13 +14,14 @@ import (
 type SitePlatform string
 
 const (
-	SitePlatformNewAPI    SitePlatform = "new-api"
-	SitePlatformAnyRouter SitePlatform = "anyrouter"
-	SitePlatformOneAPI    SitePlatform = "one-api"
-	SitePlatformOneHub    SitePlatform = "one-hub"
-	SitePlatformDoneHub   SitePlatform = "done-hub"
-	SitePlatformSub2API SitePlatform = "sub2api"
-	SitePlatformAPI     SitePlatform = "api"
+	SitePlatformNewAPI     SitePlatform = "new-api"
+	SitePlatformAnyRouter  SitePlatform = "anyrouter"
+	SitePlatformOneAPI     SitePlatform = "one-api"
+	SitePlatformOneHub     SitePlatform = "one-hub"
+	SitePlatformDoneHub    SitePlatform = "done-hub"
+	SitePlatformSub2API    SitePlatform = "sub2api"
+	SitePlatformAPI        SitePlatform = "api"
+	SitePlatformRunAnyTime SitePlatform = "runanytime"
 )
 
 type SiteCredentialType string
@@ -829,7 +830,7 @@ func SiteModelRouteTypeFromOutboundType(t outbound.OutboundType) SiteModelRouteT
 func (p SitePlatform) Validate() error {
 	switch p {
 	case SitePlatformNewAPI, SitePlatformAnyRouter, SitePlatformOneAPI, SitePlatformOneHub, SitePlatformDoneHub,
-		SitePlatformSub2API, SitePlatformAPI:
+		SitePlatformSub2API, SitePlatformAPI, SitePlatformRunAnyTime:
 		return nil
 	default:
 		return fmt.Errorf("unsupported site platform: %s", p)

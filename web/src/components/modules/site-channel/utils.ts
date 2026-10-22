@@ -127,6 +127,8 @@ export function platformLabel(platform: SiteChannelCard['platform']) {
             return 'Done Hub';
         case 'sub2api':
             return 'Sub2API';
+        case 'runanytime':
+            return '随时跑路';
         case 'api':
             return 'API 直连';
         default:
@@ -232,7 +234,7 @@ export function buildSiteTokenManagementUrl(baseUrl: string, platform: SiteChann
     if (!trimmed) return '';
 
     const normalizedBase = trimmed.replace(/\/+$/, '');
-    if (platform !== 'new-api') return normalizedBase;
+    if (platform !== 'new-api' && platform !== 'runanytime') return normalizedBase;
     return `${normalizedBase}/console/token`;
 }
 
