@@ -17,16 +17,19 @@ import (
 
 const llmPriceUrl = "https://models.dev/api.json"
 
+// 顺序决定同名模型的价格归属：原生厂商在前，先出现者胜出；
+// 聚合平台转售的同名模型以 "provider/model" 的形式另存一条。
+// 必须与 scripts/updatePrice.py 中的 PROVIDERS 保持一致。
 var Provider = []string{
 	"openai",     // GPT 系列
 	"anthropic",  // Claude 系列
 	"google",     // Gemini 系列
 	"deepseek",   // DeepSeek 系列
 	"xai",        // Grok 系列
-	"alibaba",    // Qwen 系列
 	"zhipuai",    // GLM 系列
-	"minimax",    // MiniMax 系列
 	"moonshotai", // Kimi/Moonshot
+	"minimax",    // MiniMax 系列
+	"alibaba",    // Qwen 系列，同时转售 GLM/Kimi 等模型
 	"v0",         // v0 系列
 }
 
@@ -55,12 +58,7 @@ func UpdateLLMPrice(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to fetch LLM info: %s", resp.Status)
 	}
-	var rawPrice map[string]struct {
-		Models map[string]struct {
-			ID   string         `json:"id"`
-			Cost model.LLMPrice `json:"cost"`
-		} `json:"models"`
-	}
+	var rawPrice map[string]providerModels
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
@@ -69,15 +67,49 @@ func UpdateLLMPrice(ctx context.Context) error {
 		return fmt.Errorf("failed to parse LLM info: %w", err)
 	}
 	llmPriceLock.Lock()
-	for _, provider := range Provider {
-		for _, model := range rawPrice[provider].Models {
-			model.ID = strings.ToLower(model.ID)
-			llmPrice[model.ID] = model.Cost
-		}
-	}
+	mergeProviderPrices(llmPrice, rawPrice, Provider)
 	llmPriceLock.Unlock()
 	lastUpdateTime = time.Now()
 	return nil
+}
+
+type providerModel struct {
+	ID   string         `json:"id"`
+	Cost model.LLMPrice `json:"cost"`
+}
+
+type providerModels struct {
+	Models map[string]providerModel `json:"models"`
+}
+
+// mergeProviderPrices 把各 provider 的模型价格合并进 target。
+// 同名模型以 providers 中先出现者为准（原生厂商排在聚合平台之前），
+// 后出现的转售同名模型以 "provider/model" 为 key 另存，避免互相覆盖。
+func mergeProviderPrices(
+	target map[string]model.LLMPrice,
+	raw map[string]providerModels,
+	providers []string,
+) {
+	// claimed 只记录本轮合并中谁先认领了某个 key。target 里原有的预置项
+	// 不参与判定，这样原生厂商仍能覆盖同名预置价格，转售方则走带前缀的 key。
+	claimed := make(map[string]struct{}, len(target))
+	for _, provider := range providers {
+		for _, model := range raw[provider].Models {
+			id := strings.ToLower(model.ID)
+			if id == "" {
+				continue
+			}
+			key := id
+			if _, taken := claimed[key]; taken {
+				key = provider + "/" + id
+			}
+			if _, taken := claimed[key]; taken {
+				continue
+			}
+			claimed[key] = struct{}{}
+			target[key] = model.Cost
+		}
+	}
 }
 
 func GetLastUpdateTime() time.Time {

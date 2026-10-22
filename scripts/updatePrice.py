@@ -4,6 +4,8 @@
 生成 internal/price/presets.go 文件
 """
 
+from __future__ import annotations
+
 import json
 import re
 import urllib.request
@@ -12,16 +14,19 @@ from pathlib import Path
 
 LLM_PRICE_URL = "https://models.dev/api.json"
 
+# 顺序决定同名模型的价格归属：先出现者胜出。
+# 聚合平台会同时列出别家的模型（例如 alibaba 也提供 glm / kimi），
+# 因此它们必须排在模型的原生厂商之后，避免覆盖原生厂商的价格。
 PROVIDERS = [
     "openai",      # GPT 系列
     "anthropic",   # Claude 系列
     "google",      # Gemini 系列
     "deepseek",    # DeepSeek 系列
     "xai",         # Grok 系列
-    "alibaba",     # Qwen 系列
     "zhipuai",     # GLM 系列
-    "minimax",     # MiniMax 系列
     "moonshotai",  # Kimi/Moonshot
+    "minimax",     # MiniMax 系列
+    "alibaba",     # Qwen 系列，同时转售 GLM/Kimi 等模型
     "v0",          # v0 系列
 ]
 
@@ -149,44 +154,65 @@ def generate_entry(model_id: str, cost: dict) -> str:
 def main():
     print(f"Fetching price data from {LLM_PRICE_URL}...")
     raw_price = fetch_price_data()
-    
+
     entries = []
     model_count = 0
-    
+    # key -> 首次占用它的 provider。同名模型以先出现者为准（原生厂商在前），
+    # 后续 provider 转售的同名模型改用 "{provider}/{model_id}" 保留。
+    claimed: dict[str, str] = {}
+
+    def claim(model_id: str, provider: str) -> str | None:
+        key = model_id
+        if key in claimed:
+            key = f"{provider}/{model_id}"
+        if key in claimed:
+            print(f"  Skipping conflicting key '{key}' from {provider}")
+            return None
+        claimed[key] = provider
+        return key
+
     for provider in PROVIDERS:
         if provider not in raw_price:
             print(f"  Provider '{provider}' not found, skipping...")
             continue
-            
+
         models = raw_price[provider].get("models", {})
         provider_count = 0
-        
+
         for model_data in models.values():
             model_id = model_data.get("id", "").lower()
             cost = model_data.get("cost", {})
-            
+
             if not model_id:
                 continue
-            
+
             # 添加原始模型
-            entries.append(generate_entry(model_id, cost))
+            key = claim(model_id, provider)
+            if key is None:
+                continue
+            if key != model_id:
+                print(f"  Resold '{model_id}' from {provider} kept as '{key}'")
+            entries.append(generate_entry(key, cost))
             provider_count += 1
-            
+
             # 收集所有别名
             aliases = []
-            
+
             # 1. Claude 模型自动生成别名
             aliases.extend(generate_claude_aliases(model_id))
-            
+
             # 2. 静态别名映射
             if model_id in MODEL_ALIASES:
                 aliases.extend(MODEL_ALIASES[model_id])
-            
+
             # 添加别名 (去重)
-            for alias in set(aliases):
-                entries.append(generate_entry(alias.lower(), cost))
+            for alias in sorted(set(aliases)):
+                alias_key = claim(alias.lower(), provider)
+                if alias_key is None:
+                    continue
+                entries.append(generate_entry(alias_key, cost))
                 provider_count += 1
-            
+
         print(f"  {provider}: {provider_count} models")
         model_count += provider_count
     
