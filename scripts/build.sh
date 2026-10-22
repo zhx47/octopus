@@ -260,6 +260,11 @@ update_price() {
         log_error "Failed to update price"
         return 1
     fi
+    # 生成器按 key 顺序输出，不负责对齐，交给 gofmt 保持仓库里格式稳定。
+    if ! gofmt -w internal/price/presets.go; then
+        log_error "Failed to format internal/price/presets.go"
+        return 1
+    fi
     log_success "Price updated"
 }
 
@@ -580,29 +585,46 @@ main() {
         log_step "Building binaries"
 
         # Standard builds (pure Go, static binaries)
+        local build_failures=0
+
         if ! build_standard linux x86_64; then
             log_error "Failed to build Linux x86_64"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard linux arm64; then
             log_error "Failed to build Linux arm64"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard linux armv7; then
             log_error "Failed to build Linux armv7"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard linux x86; then
             log_error "Failed to build Linux x86"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard windows x86_64; then
             log_error "Failed to build Windows x86_64"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard windows x86; then
             log_error "Failed to build Windows x86"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard darwin arm64; then
             log_error "Failed to build Darwin arm64"
+            build_failures=$((build_failures + 1))
         fi
         if ! build_standard darwin x86_64; then
-            log_error "Failed to build Darwin arm64"
+            log_error "Failed to build Darwin x86_64"
+            build_failures=$((build_failures + 1))
+        fi
+
+        # 一旦有平台编译失败就直接退出，否则后续步骤会在空产物上"成功"，
+        # CI 看起来是绿的但 Release 里没有任何二进制。
+        if [ "$build_failures" -ne 0 ]; then
+            log_error "${build_failures} platform build(s) failed, aborting release"
+            exit 1
         fi
 
         # Post-processing
